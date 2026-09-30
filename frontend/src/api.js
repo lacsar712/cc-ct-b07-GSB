@@ -54,9 +54,23 @@ export function fetchSubmission(id) {
   return request(`/submissions/${id}`);
 }
 
-export function createSubmission(tool_code, offset_um) {
+export function createSubmission(tool_code, offset_um, priority = "normal") {
   return request("/submissions", {
     method: "POST",
-    body: JSON.stringify({ tool_code, offset_um: Number(offset_um) }),
+    body: JSON.stringify({ tool_code, offset_um: Number(offset_um), priority }),
+  });
+}
+
+export function fetchHold() {
+  return request("/hold");
+}
+
+export function updateHoldConfig(fail_threshold, hold_seconds) {
+  return request("/hold/config", {
+    method: "PUT",
+    body: JSON.stringify({
+      fail_threshold: Number(fail_threshold),
+      hold_seconds: Number(hold_seconds),
+    }),
   });
 }

@@ -1,4 +1,11 @@
-"""Background worker: claim pending rows with SKIP LOCKED and apply verdict."""
+"""Background worker: claim pending rows with SKIP LOCKED and apply verdict.
+
+缓领规则下的认领顺序（与专页状态灯同源，均走 desk.services）：
+- 每轮先 sync_hold_state() 对账，到期的缓领在此刻补写「解除」流水；
+- 在缓期间只认领急补（urgent），普通（normal）保留待复核；
+- 不在缓时急补、普通均可认领（急补优先）；
+- 每笔结清后调用 maybe_start_hold，连续超差达阈值即开始缓领。
+"""
 
 import os
 import sys
@@ -21,15 +28,25 @@ def claim_one_pending():
     from django.db import transaction
 
     from desk.models import OffsetSubmission
-    from desk.services import apply_verdict
+    from desk.services import (
+        apply_verdict,
+        maybe_start_hold,
+        sync_hold_state,
+    )
+
+    # 同源对账：认领跳过与状态灯用的是同一个在缓判定。
+    hold = sync_hold_state()
 
     with transaction.atomic():
-        submission = (
+        qs = (
             OffsetSubmission.objects.select_for_update(skip_locked=True)
             .filter(status=OffsetSubmission.Status.PENDING)
-            .order_by("created_at", "id")
-            .first()
         )
+        if hold["active"]:
+            # 缓领中：普通停领，急补仍可领
+            qs = qs.filter(priority=OffsetSubmission.Priority.URGENT)
+        # 急补（urgent）字典序在普通（normal）前，始终优先认领
+        submission = qs.order_by("-priority", "created_at", "id").first()
         if submission is None:
             return False
 
@@ -37,6 +54,7 @@ def claim_one_pending():
         submission.save(update_fields=["status"])
 
     apply_verdict(submission)
+    maybe_start_hold(submission)
     return True
 
 
