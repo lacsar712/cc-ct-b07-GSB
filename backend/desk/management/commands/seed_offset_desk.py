@@ -1,8 +1,10 @@
+from datetime import timedelta
+
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from desk.auth_utils import hash_password
-from desk.models import OffsetSubmission, User
+from desk.models import OffsetSubmission, SlowdownConfig, User
 
 
 class Command(BaseCommand):
@@ -26,7 +28,10 @@ class Command(BaseCommand):
             },
         )
 
-        now = timezone.now()
+        # 缓领机制先启用，再放置种子记录，并将其复核时间置于启用之前，
+        # 使历史种子数据（T09 超差）不预置连续超差计数。
+        config = SlowdownConfig.load()
+        seed_time = config.created_at - timedelta(minutes=1)
         seeds = [
             ("T01", 5, OffsetSubmission.Verdict.PASS),
             ("T09", 20, OffsetSubmission.Verdict.FAIL),
@@ -39,7 +44,7 @@ class Command(BaseCommand):
                     "status": OffsetSubmission.Status.DONE,
                     "verdict": verdict,
                     "submitted_by": machinist,
-                    "reviewed_at": now,
+                    "reviewed_at": seed_time,
                 },
             )
 

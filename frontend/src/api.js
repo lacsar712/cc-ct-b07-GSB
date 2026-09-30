@@ -54,9 +54,20 @@ export function fetchSubmission(id) {
   return request(`/submissions/${id}`);
 }
 
-export function createSubmission(tool_code, offset_um) {
+export function createSubmission(tool_code, offset_um, priority = "normal") {
   return request("/submissions", {
     method: "POST",
-    body: JSON.stringify({ tool_code, offset_um: Number(offset_um) }),
+    body: JSON.stringify({ tool_code, offset_um: Number(offset_um), priority }),
+  });
+}
+
+export function fetchSlowdown() {
+  return request("/slowdown");
+}
+
+export function updateSlowdownConfig(patch) {
+  return request("/slowdown/config", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
   });
 }

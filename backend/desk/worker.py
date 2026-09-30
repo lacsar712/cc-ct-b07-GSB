@@ -1,4 +1,8 @@
-"""Background worker: claim pending rows with SKIP LOCKED and apply verdict."""
+"""Background worker: claim pending rows with SKIP LOCKED and apply verdict.
+
+缓领语义见 desk/services.py：在缓期间普通刀补不被认领（急补照常），
+连续超差达阈值自动开启缓领，秒数尽后落解除流水并恢复普通认领。
+"""
 
 import os
 import sys
@@ -17,26 +21,19 @@ def setup_django() -> None:
     django.setup()
 
 
-def claim_one_pending():
-    from django.db import transaction
+def process_once():
+    """先补到期解除，再认领一笔并结清；返回是否认领并处理了一笔。"""
+    from desk.services import (
+        claim_next_pending,
+        expire_due_slowdowns,
+        settle_and_maybe_trigger,
+    )
 
-    from desk.models import OffsetSubmission
-    from desk.services import apply_verdict
-
-    with transaction.atomic():
-        submission = (
-            OffsetSubmission.objects.select_for_update(skip_locked=True)
-            .filter(status=OffsetSubmission.Status.PENDING)
-            .order_by("created_at", "id")
-            .first()
-        )
-        if submission is None:
-            return False
-
-        submission.status = OffsetSubmission.Status.PROCESSING
-        submission.save(update_fields=["status"])
-
-    apply_verdict(submission)
+    expire_due_slowdowns()
+    submission = claim_next_pending()
+    if submission is None:
+        return False
+    settle_and_maybe_trigger(submission)
     return True
 
 
@@ -44,14 +41,14 @@ def run_loop(poll_seconds: float = 0.5) -> None:
     setup_django()
     print("cnc-offset worker started", flush=True)
     while True:
-        claimed = claim_one_pending()
-        if not claimed:
+        processed = process_once()
+        if not processed:
             time.sleep(poll_seconds)
 
 
 if __name__ == "__main__":
     setup_django()
     if len(sys.argv) > 1 and sys.argv[1] == "once":
-        claim_one_pending()
+        process_once()
     else:
         run_loop()
